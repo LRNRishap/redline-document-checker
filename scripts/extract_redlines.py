@@ -276,6 +276,21 @@ def create_block(page, lesson, template, block_type="Redline Block"):
     }
 
 
+def should_continue_redline_group(text):
+    clean = text.strip()
+
+    if not clean:
+        return True
+
+    if is_major_boundary(clean):
+        return False
+
+    if is_question_start(clean):
+        return False
+
+    return True
+
+
 def extract_redline_blocks(docx_path):
     results = []
 
@@ -284,6 +299,8 @@ def extract_redline_blocks(docx_path):
     current_template = "Unknown"
 
     active_question_block = None
+    active_redline_group = None
+    quiet_gap_count = 0
 
     with zipfile.ZipFile(docx_path) as docx:
         xml = docx.read("word/document.xml")
@@ -300,14 +317,28 @@ def extract_redline_blocks(docx_path):
             "runs": runs,
         }
 
+        has_redline = paragraph_has_redline(paragraph_info)
+
         # Always update metadata from document text.
         if text:
             current_page = detect_page(text, current_page)
             current_lesson = detect_lesson(text, current_lesson)
             current_template = detect_template(text, current_template)
 
-        # If a new question starts, close previous question block.
+        # Close normal redline group when we reach a major boundary.
+        if active_redline_group and text and is_major_boundary(text):
+            if block_has_redline(active_redline_group):
+                results.append(active_redline_group)
+            active_redline_group = None
+            quiet_gap_count = 0
+
+        # If a new question starts, close any existing group first.
         if text and is_question_start(text):
+            if active_redline_group and block_has_redline(active_redline_group):
+                results.append(active_redline_group)
+            active_redline_group = None
+            quiet_gap_count = 0
+
             if active_question_block and block_has_redline(active_question_block):
                 results.append(active_question_block)
 
@@ -320,7 +351,7 @@ def extract_redline_blocks(docx_path):
             active_question_block["paragraphs"].append(paragraph_info)
             continue
 
-        # If inside a question block, keep collecting until next major boundary.
+        # If inside a question block, keep collecting until a major boundary.
         if active_question_block:
             if text and is_major_boundary(text):
                 if block_has_redline(active_question_block):
@@ -330,20 +361,43 @@ def extract_redline_blocks(docx_path):
                 active_question_block["paragraphs"].append(paragraph_info)
                 continue
 
-        # Outside question blocks, only keep redlined paragraphs.
-        if paragraph_has_redline(paragraph_info):
-            block = create_block(
-                current_page,
-                current_lesson,
-                current_template,
-                "Redline Paragraph"
-            )
-            block["paragraphs"].append(paragraph_info)
-            results.append(block)
+        # Group related non-question redline paragraphs.
+        if has_redline:
+            if not active_redline_group:
+                active_redline_group = create_block(
+                    current_page,
+                    current_lesson,
+                    current_template,
+                    "Redline Group"
+                )
 
-    # Close final active question block.
+            active_redline_group["paragraphs"].append(paragraph_info)
+            quiet_gap_count = 0
+            continue
+
+        # If we are inside a redline group, keep nearby context lines.
+        # This helps combine items inside the same visual box/list.
+        if active_redline_group:
+            if should_continue_redline_group(text) and quiet_gap_count < 2:
+                active_redline_group["paragraphs"].append(paragraph_info)
+
+                if text.strip():
+                    quiet_gap_count += 1
+
+                continue
+
+            if block_has_redline(active_redline_group):
+                results.append(active_redline_group)
+
+            active_redline_group = None
+            quiet_gap_count = 0
+
+    # Close final active blocks.
     if active_question_block and block_has_redline(active_question_block):
         results.append(active_question_block)
+
+    if active_redline_group and block_has_redline(active_redline_group):
+        results.append(active_redline_group)
 
     return results
 
