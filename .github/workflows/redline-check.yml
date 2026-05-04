@@ -29,7 +29,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Extract redline changes
-        run: python scripts/extract_redlines.py input output/redline_report.txt
+        run: python scripts/extract_redlines.py input output/redline_report.docx
 
       - name: Upload redline report
         uses: actions/upload-artifact@v4
