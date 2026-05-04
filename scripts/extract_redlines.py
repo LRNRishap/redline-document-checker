@@ -231,7 +231,7 @@ def add_docx_run(paragraph, text, red=False, strike=False, underline=False, bold
         return
 
     run = paragraph.add_run(text)
-    run.font.size = Pt(10)
+    run.font.size = Pt(14)
 
     if red:
         run.font.color.rgb = RED
@@ -413,6 +413,34 @@ def remove_empty_first_paragraph(cell):
         p.getparent().remove(p)
 
 
+def create_meta_box(doc, page, lesson, template):
+    meta_table = doc.add_table(rows=3, cols=1)
+    meta_table.style = "Table Grid"
+    meta_table.alignment = WD_TABLE_ALIGNMENT.LEFT
+
+    cells = [
+        meta_table.cell(0, 0),
+        meta_table.cell(1, 0),
+        meta_table.cell(2, 0),
+    ]
+
+    labels = [
+        f"Page Number: {page}",
+        lesson,
+        template,
+    ]
+
+    for cell, label in zip(cells, labels):
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        paragraph = cell.paragraphs[0]
+        paragraph.alignment = 0
+        run = paragraph.add_run(label)
+        run.bold = True
+        run.font.size = Pt(10)
+
+    return meta_table
+
+
 def create_two_column_docx(results, output_file):
     doc = Document()
 
@@ -437,12 +465,15 @@ def create_two_column_docx(results, output_file):
         return
 
     for item in results:
-        meta = doc.add_paragraph()
-        add_docx_run(
-            meta,
-            f"Page Number: {item['page']} | Lesson: {item['lesson']} | Template Used: {item['template']}",
-            bold=True
+        # Metadata box on the LEFT, similar to the source document.
+        create_meta_box(
+            doc,
+            item["page"],
+            item["lesson"],
+            item["template"]
         )
+
+        doc.add_paragraph("")
 
         table = doc.add_table(rows=2, cols=2)
         table.style = "Table Grid"
