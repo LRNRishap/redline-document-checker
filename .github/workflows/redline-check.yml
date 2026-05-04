@@ -35,4 +35,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: redline-report
-          path: output/redline_report.txt
+          path: output/redline_report.docx
