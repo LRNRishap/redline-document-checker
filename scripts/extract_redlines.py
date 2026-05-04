@@ -13,7 +13,6 @@ NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 }
 
-
 RED = RGBColor(192, 0, 0)
 
 
@@ -47,92 +46,7 @@ def is_underline_run(run):
     return bool(run.xpath(".//w:rPr/w:u", namespaces=NS))
 
 
-def detect_page(text, current_page):
-    match = re.search(r"Page Number\s*:\s*(\d+)", text, re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-    return current_page
-
-
-def detect_lesson(text, current_lesson):
-    clean = text.strip()
-    lowered = clean.lower()
-
-    if lowered.startswith("lesson ") and ":" in clean:
-        return clean
-
-    if lowered.startswith("lesson:"):
-        return clean.split(":", 1)[1].strip()
-
-    if lowered.startswith("lesson name:"):
-        return clean.split(":", 1)[1].strip()
-
-    return current_lesson
-
-
-def detect_template(text, current_template):
-    clean = text.strip()
-    lowered = clean.lower()
-
-    known_templates = [
-        "click and reveal template",
-        "binary list template",
-        "question and answer template",
-        "text and image template",
-        "video template",
-        "hotspot image template",
-    ]
-
-    for template in known_templates:
-        if lowered.startswith(template):
-            return clean
-
-    if lowered.startswith("select type"):
-        return clean.replace("Select Type", "").replace(":", "").strip() or current_template
-
-    if lowered.startswith("template:"):
-        return clean.split(":", 1)[1].strip()
-
-    if lowered.startswith("template used:"):
-        return clean.split(":", 1)[1].strip()
-
-    if lowered.startswith("template type:"):
-        return clean.split(":", 1)[1].strip()
-
-    return current_template
-
-
-def add_docx_run(paragraph, text, red=False, strike=False, underline=False, bold=False):
-    if not text:
-        return
-
-    run = paragraph.add_run(text)
-    run.font.size = Pt(10)
-
-    if red:
-        run.font.color.rgb = RED
-
-    if strike:
-        run.font.strike = True
-
-    if underline:
-        run.font.underline = True
-
-    if bold:
-        run.bold = True
-
-
 def collect_runs_from_element(element, inside_change=None):
-    """
-    Returns runs as dictionaries:
-    {
-      text,
-      red,
-      strike,
-      underline,
-      is_redline
-    }
-    """
     results = []
     local = tag_name(element)
 
@@ -143,6 +57,7 @@ def collect_runs_from_element(element, inside_change=None):
 
     if local == "r":
         text = get_text(element)
+
         if text:
             visual_red = is_red_run(element)
             visual_strike = is_strike_run(element)
@@ -177,7 +92,7 @@ def collect_runs_from_element(element, inside_change=None):
                     "text": text,
                     "red": False,
                     "strike": False,
-                    "underline": visual_underline,
+                    "underline": False,
                     "is_redline": False,
                 })
 
@@ -189,9 +104,176 @@ def collect_runs_from_element(element, inside_change=None):
     return results
 
 
-def paragraph_has_redline(paragraph):
-    runs = collect_runs_from_element(paragraph)
-    return any(run["is_redline"] for run in runs)
+def paragraph_has_redline(paragraph_info):
+    return any(run["is_redline"] for run in paragraph_info["runs"])
+
+
+def detect_page(text, current_page):
+    match = re.search(r"Page Number\s*:\s*(\d+)", text, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return current_page
+
+
+def detect_lesson(text, current_lesson):
+    clean = text.strip()
+    lowered = clean.lower()
+
+    # Avoid incorrectly using "Lesson Type :" as the lesson name.
+    if lowered.startswith("lesson type"):
+        return current_lesson
+
+    if re.match(r"^lesson\s+\d+\s*:", clean, re.IGNORECASE):
+        return clean
+
+    if lowered.startswith("lesson name:"):
+        return clean.split(":", 1)[1].strip()
+
+    return current_lesson
+
+
+def detect_template(text, current_template):
+    clean = text.strip()
+    lowered = clean.lower()
+
+    known_templates = [
+        "click and reveal template",
+        "binary list template",
+        "question and answer template",
+        "text and image template",
+        "video template",
+        "hotspot image template",
+    ]
+
+    for template in known_templates:
+        if lowered.startswith(template):
+            return clean
+
+    if lowered.startswith("select type"):
+        return clean.replace("Select Type", "").replace(":", "").strip() or current_template
+
+    if lowered.startswith("template used:"):
+        return clean.split(":", 1)[1].strip()
+
+    if lowered.startswith("template type:"):
+        return clean.split(":", 1)[1].strip()
+
+    if lowered.startswith("template:"):
+        return clean.split(":", 1)[1].strip()
+
+    return current_template
+
+
+def is_question_start(text):
+    clean = text.strip()
+    return bool(
+        re.match(r"^\d+\.\s*Question\s*:", clean, re.IGNORECASE)
+        or re.match(r"^Question\s*:", clean, re.IGNORECASE)
+    )
+
+
+def is_page_header(text):
+    return bool(re.match(r"^Page Number\s*:", text.strip(), re.IGNORECASE))
+
+
+def is_lesson_header(text):
+    clean = text.strip()
+    return bool(re.match(r"^Lesson\s+\d+\s*:", clean, re.IGNORECASE))
+
+
+def is_template_header(text):
+    clean = text.strip().lower()
+
+    known_templates = [
+        "click and reveal template",
+        "binary list template",
+        "question and answer template",
+        "text and image template",
+        "video template",
+        "hotspot image template",
+    ]
+
+    return any(clean.startswith(template) for template in known_templates)
+
+
+def is_quiz_end_boundary(text):
+    clean = text.strip().lower()
+
+    endings = [
+        "number of questions needed to pass",
+        "passed message",
+        "failed message",
+        "feedback for correct",
+        "feedback for incorrect",
+        "feedback for partial",
+        "reveal content for desktop",
+        "reveal content for mobile",
+        "audio transcript text",
+    ]
+
+    return any(clean.startswith(item) for item in endings)
+
+
+def is_major_boundary(text):
+    if not text.strip():
+        return False
+
+    return (
+        is_page_header(text)
+        or is_lesson_header(text)
+        or is_template_header(text)
+        or is_quiz_end_boundary(text)
+    )
+
+
+def add_docx_run(paragraph, text, red=False, strike=False, underline=False, bold=False):
+    if not text:
+        return
+
+    run = paragraph.add_run(text)
+    run.font.size = Pt(10)
+
+    if red:
+        run.font.color.rgb = RED
+
+    if strike:
+        run.font.strike = True
+
+    if underline:
+        run.font.underline = True
+
+    if bold:
+        run.bold = True
+
+
+def add_paragraph_runs(cell, paragraph_info, redline_only=False):
+    p = cell.add_paragraph()
+
+    for run in paragraph_info["runs"]:
+        if redline_only and not run["is_redline"]:
+            continue
+
+        add_docx_run(
+            p,
+            run["text"],
+            red=run["red"],
+            strike=run["strike"],
+            underline=run["underline"],
+        )
+
+
+def block_has_redline(block):
+    return any(paragraph_has_redline(p) for p in block["paragraphs"])
+
+
+def create_block(page, lesson, template, block_type="Redline Block"):
+    return {
+        "page": page,
+        "lesson": lesson,
+        "template": template,
+        "block_type": block_type,
+        "paragraphs": [],
+    }
 
 
 def extract_redline_blocks(docx_path):
@@ -201,6 +283,8 @@ def extract_redline_blocks(docx_path):
     current_lesson = "Unknown"
     current_template = "Unknown"
 
+    active_question_block = None
+
     with zipfile.ZipFile(docx_path) as docx:
         xml = docx.read("word/document.xml")
 
@@ -209,28 +293,70 @@ def extract_redline_blocks(docx_path):
 
     for paragraph in paragraphs:
         text = paragraph_text(paragraph)
+        runs = collect_runs_from_element(paragraph)
 
+        paragraph_info = {
+            "text": text,
+            "runs": runs,
+        }
+
+        # Always update metadata from document text.
         if text:
             current_page = detect_page(text, current_page)
             current_lesson = detect_lesson(text, current_lesson)
             current_template = detect_template(text, current_template)
 
-        if paragraph_has_redline(paragraph):
-            runs = collect_runs_from_element(paragraph)
+        # If a new question starts, close previous question block.
+        if text and is_question_start(text):
+            if active_question_block and block_has_redline(active_question_block):
+                results.append(active_question_block)
 
-            results.append({
-                "page": current_page,
-                "lesson": current_lesson,
-                "template": current_template,
-                "runs": runs,
-            })
+            active_question_block = create_block(
+                current_page,
+                current_lesson,
+                current_template,
+                "Question Block"
+            )
+            active_question_block["paragraphs"].append(paragraph_info)
+            continue
+
+        # If inside a question block, keep collecting until next major boundary.
+        if active_question_block:
+            if text and is_major_boundary(text):
+                if block_has_redline(active_question_block):
+                    results.append(active_question_block)
+                active_question_block = None
+            else:
+                active_question_block["paragraphs"].append(paragraph_info)
+                continue
+
+        # Outside question blocks, only keep redlined paragraphs.
+        if paragraph_has_redline(paragraph_info):
+            block = create_block(
+                current_page,
+                current_lesson,
+                current_template,
+                "Redline Paragraph"
+            )
+            block["paragraphs"].append(paragraph_info)
+            results.append(block)
+
+    # Close final active question block.
+    if active_question_block and block_has_redline(active_question_block):
+        results.append(active_question_block)
 
     return results
 
 
 def set_cell_header(cell, text):
-    paragraph = cell.paragraphs[0]
-    add_docx_run(paragraph, text, bold=True)
+    p = cell.paragraphs[0]
+    add_docx_run(p, text, bold=True)
+
+
+def remove_empty_first_paragraph(cell):
+    if cell.paragraphs and not cell.paragraphs[0].text:
+        p = cell.paragraphs[0]._element
+        p.getparent().remove(p)
 
 
 def create_two_column_docx(results, output_file):
@@ -248,7 +374,7 @@ def create_two_column_docx(results, output_file):
     intro = doc.add_paragraph()
     add_docx_run(
         intro,
-        "Left column shows the original paragraph or sentence. Right column shows only the redlined content from that same block."
+        "Each table groups related redline changes together. For questions, the full question and answer set appears in one block."
     )
 
     if not results:
@@ -268,35 +394,25 @@ def create_two_column_docx(results, output_file):
         table.style = "Table Grid"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-        table.cell(0, 0).vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
-        table.cell(0, 1).vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
-        table.cell(1, 0).vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
-        table.cell(1, 1).vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        for row in table.rows:
+            for cell in row.cells:
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
 
         set_cell_header(table.cell(0, 0), "Original Content")
         set_cell_header(table.cell(0, 1), "Redline Content Only")
 
-        original_paragraph = table.cell(1, 0).paragraphs[0]
-        redline_paragraph = table.cell(1, 1).paragraphs[0]
+        original_cell = table.cell(1, 0)
+        redline_cell = table.cell(1, 1)
 
-        for run in item["runs"]:
-            add_docx_run(
-                original_paragraph,
-                run["text"],
-                red=run["red"],
-                strike=run["strike"],
-                underline=run["underline"],
-            )
+        for paragraph_info in item["paragraphs"]:
+            add_paragraph_runs(original_cell, paragraph_info, redline_only=False)
 
-        for run in item["runs"]:
-            if run["is_redline"]:
-                add_docx_run(
-                    redline_paragraph,
-                    run["text"],
-                    red=run["red"],
-                    strike=run["strike"],
-                    underline=run["underline"],
-                )
+        for paragraph_info in item["paragraphs"]:
+            if paragraph_has_redline(paragraph_info):
+                add_paragraph_runs(redline_cell, paragraph_info, redline_only=True)
+
+        remove_empty_first_paragraph(original_cell)
+        remove_empty_first_paragraph(redline_cell)
 
         doc.add_paragraph("")
 
