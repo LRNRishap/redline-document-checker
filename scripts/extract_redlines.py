@@ -434,9 +434,10 @@ def create_meta_box(doc, page, lesson, template):
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
         paragraph = cell.paragraphs[0]
         paragraph.alignment = 0
+
         run = paragraph.add_run(label)
         run.bold = True
-        run.font.size = Pt(10)
+        run.font.size = Pt(14)
 
     return meta_table
 
